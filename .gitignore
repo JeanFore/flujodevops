@@ -31,6 +31,8 @@ yarn-error.log*
 **/*.tfstate.*
 **/*.tfvars
 !**/*.tfvars.example
+**/*.tfplan
+**/tfplan
 **/crash.log
 **/override.tf
 **/override.tf.json
