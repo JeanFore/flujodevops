@@ -1,0 +1,156 @@
+name: Backend Pipeline SCDF
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "20"
+
+jobs:
+  backend-tests:
+    name: Tests de backend
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Instalar dependencias del backend
+        working-directory: backend
+        run: npm ci
+
+      - name: Generar Prisma Client
+        working-directory: backend
+        run: npm run prisma:generate
+
+      - name: Ejecutar tests de backend
+        working-directory: backend
+        run: npm test -- --runInBand
+
+  backend-build:
+    name: Build de backend
+    runs-on: ubuntu-latest
+    needs: backend-tests
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Instalar dependencias del backend
+        working-directory: backend
+        run: npm ci
+
+      - name: Generar Prisma Client
+        working-directory: backend
+        run: npm run prisma:generate
+
+      - name: Generar build del backend
+        working-directory: backend
+        run: npm run build
+
+      - name: Empaquetar build para despliegue
+        run: |
+          mkdir -p backend-release
+          tar -czf backend-release/backend.tar.gz -C backend package.json package-lock.json prisma dist
+
+      - name: Publicar artefacto del backend
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-release
+          path: backend-release/backend.tar.gz
+          retention-days: 1
+
+  deploy-backend:
+    name: Despliegue backend EC2
+    runs-on: ubuntu-latest
+    needs: backend-build
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+
+    steps:
+      - name: Descargar artefacto del backend
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-release
+          path: backend-release
+
+      - name: Resolver configuracion de despliegue
+        shell: bash
+        env:
+          EC2_INSTANCE_SECRET: ${{ secrets.EC2_INSTANCE }}
+          EC2_USER_SECRET: ${{ secrets.EC2_USER }}
+          EC2_DEPLOY_PATH_SECRET: ${{ secrets.EC2_DEPLOY_PATH }}
+          EC2_SSH_KEY_SECRET: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          if [ -z "$EC2_INSTANCE_SECRET" ]; then
+            echo "::error::Falta el secret EC2_INSTANCE"
+            exit 1
+          fi
+
+          if [ -z "$EC2_SSH_KEY_SECRET" ]; then
+            echo "::error::Falta el secret EC2_SSH_KEY"
+            exit 1
+          fi
+
+          EC2_USER="${EC2_USER_SECRET:-ec2-user}"
+          EC2_DEPLOY_PATH="${EC2_DEPLOY_PATH_SECRET:-/home/${EC2_USER}/ai4devs-backend}"
+
+          {
+            echo "EC2_INSTANCE=$EC2_INSTANCE_SECRET"
+            echo "EC2_USER=$EC2_USER"
+            echo "EC2_DEPLOY_PATH=$EC2_DEPLOY_PATH"
+          } >> "$GITHUB_ENV"
+
+      - name: Configurar llave SSH
+        shell: bash
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/ec2_key
+          chmod 600 ~/.ssh/ec2_key
+          ssh-keyscan -H "$EC2_INSTANCE" >> ~/.ssh/known_hosts
+
+      - name: Subir build al EC2
+        shell: bash
+        run: |
+          ssh -i ~/.ssh/ec2_key -o StrictHostKeyChecking=yes "$EC2_USER@$EC2_INSTANCE" "mkdir -p '$EC2_DEPLOY_PATH/releases'"
+          scp -i ~/.ssh/ec2_key -o StrictHostKeyChecking=yes backend-release/backend.tar.gz "$EC2_USER@$EC2_INSTANCE:$EC2_DEPLOY_PATH/releases/backend-$GITHUB_SHA.tar.gz"
+
+      - name: Instalar y reiniciar backend en EC2
+        shell: bash
+        run: |
+          ssh -i ~/.ssh/ec2_key -o StrictHostKeyChecking=yes "$EC2_USER@$EC2_INSTANCE" "DEPLOY_PATH='$EC2_DEPLOY_PATH' RELEASE='backend-$GITHUB_SHA.tar.gz' bash -s" <<'EOF'
+          set -euo pipefail
+
+          mkdir -p "$DEPLOY_PATH/current"
+          tar -xzf "$DEPLOY_PATH/releases/$RELEASE" -C "$DEPLOY_PATH/current"
+
+          cd "$DEPLOY_PATH/current"
+          npm ci
+          npm run prisma:generate
+          npm prune --omit=dev
+
+          pm2 restart ai4devs-backend --update-env || pm2 start dist/index.js --name ai4devs-backend
+          pm2 save
+          EOF
