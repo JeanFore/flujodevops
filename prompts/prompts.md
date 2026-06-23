@@ -31,3 +31,5 @@ Prompt utilizado:
 ```text
 Configura el workflow para que se active con pull_request en los tipos opened, synchronize y reopened. El tipo synchronize debe cubrir el caso principal del ejercicio: cada push nuevo a una rama que ya tiene un Pull Request abierto.
 ```
+
+Prueba de pipeline con EC2 SCDF.
