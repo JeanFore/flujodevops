@@ -102,6 +102,14 @@ jobs:
           EC2_DEPLOY_PATH_SECRET: ${{ secrets.EC2_DEPLOY_PATH }}
           EC2_SSH_KEY_SECRET: ${{ secrets.EC2_SSH_KEY }}
         run: |
+          trim_secret() {
+            printf '%s' "$1" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+          }
+
+          EC2_INSTANCE_SECRET="$(trim_secret "$EC2_INSTANCE_SECRET")"
+          EC2_USER_SECRET="$(trim_secret "$EC2_USER_SECRET")"
+          EC2_DEPLOY_PATH_SECRET="$(trim_secret "$EC2_DEPLOY_PATH_SECRET")"
+
           if [ -z "$EC2_INSTANCE_SECRET" ]; then
             echo "::error::Falta el secret EC2_INSTANCE"
             exit 1
