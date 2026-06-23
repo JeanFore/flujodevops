@@ -97,41 +97,23 @@ jobs:
       - name: Resolver configuracion de despliegue
         shell: bash
         env:
-          EC2_INSTANCE_SECRET: ${{ secrets.EC2_INSTANCE }}
-          EC2_USER_SECRET: ${{ secrets.EC2_USER }}
-          EC2_DEPLOY_PATH_SECRET: ${{ secrets.EC2_DEPLOY_PATH }}
           EC2_SSH_KEY_SECRET: ${{ secrets.EC2_SSH_KEY }}
         run: |
           trim_secret() {
             printf '%s' "$1" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
           }
 
-          EC2_INSTANCE_SECRET="$(trim_secret "$EC2_INSTANCE_SECRET")"
-          EC2_USER_SECRET="$(trim_secret "$EC2_USER_SECRET")"
-          EC2_DEPLOY_PATH_SECRET="$(trim_secret "$EC2_DEPLOY_PATH_SECRET")"
-
-          if [ -z "$EC2_INSTANCE_SECRET" ]; then
-            echo "::error::Falta el secret EC2_INSTANCE"
-            exit 1
-          fi
-
           if [ -z "$EC2_SSH_KEY_SECRET" ]; then
             echo "::error::Falta el secret EC2_SSH_KEY"
             exit 1
           fi
 
-          EXPECTED_EC2_INSTANCE="ec2-44-220-172-92.compute-1.amazonaws.com"
-          if [ "$EC2_INSTANCE_SECRET" != "$EXPECTED_EC2_INSTANCE" ]; then
-            echo "::error::EC2_INSTANCE no apunta a la EC2 creada por Terraform. Actualiza el secret EC2_INSTANCE."
-            echo "EC2_INSTANCE esperado: $EXPECTED_EC2_INSTANCE"
-            exit 1
-          fi
-
+          EC2_INSTANCE="ec2-44-220-172-92.compute-1.amazonaws.com"
           EC2_USER="ec2-user"
-          EC2_DEPLOY_PATH="${EC2_DEPLOY_PATH_SECRET:-/home/${EC2_USER}/ai4devs-backend}"
+          EC2_DEPLOY_PATH="/home/ec2-user/ai4devs-backend"
 
           {
-            echo "EC2_INSTANCE=$EC2_INSTANCE_SECRET"
+            echo "EC2_INSTANCE=$EC2_INSTANCE"
             echo "EC2_USER=$EC2_USER"
             echo "EC2_DEPLOY_PATH=$EC2_DEPLOY_PATH"
           } >> "$GITHUB_ENV"
@@ -151,15 +133,30 @@ jobs:
           echo "Fingerprint recibido por GitHub Actions:"
           ssh-keygen -lf ~/.ssh/ec2_key.pub
 
+          RECEIVED_FINGERPRINT="$(ssh-keygen -lf ~/.ssh/ec2_key.pub | awk '{print $2}')"
+          if [ "$RECEIVED_FINGERPRINT" != "SHA256:HTZl6AqWj462Ga4Gnrk+op0UB0hBetJepdtBZ16lb3c" ]; then
+            echo "::error::EC2_SSH_KEY no corresponde a la llave autorizada en la EC2."
+            exit 1
+          fi
+
       - name: Validar conexion SSH
         shell: bash
         run: |
-          ssh -i ~/.ssh/ec2_key \
+          set +e
+          ssh -vvv -i ~/.ssh/ec2_key \
             -o IdentitiesOnly=yes \
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
             -o ConnectTimeout=15 \
-            "$EC2_USER@$EC2_INSTANCE" "echo SSH_OK"
+            "$EC2_USER@$EC2_INSTANCE" "echo SSH_OK && whoami && hostname" 2>&1 | tee ssh-debug.log
+          SSH_EXIT="${PIPESTATUS[0]}"
+
+          if [ "$SSH_EXIT" -ne 0 ]; then
+            echo "::group::Resumen debug SSH"
+            grep -E "Authenticating to|Offering public key|Server accepts key|Permission denied|Authentications that can continue" ssh-debug.log || true
+            echo "::endgroup::"
+            exit "$SSH_EXIT"
+          fi
 
       - name: Subir build al EC2
         shell: bash
