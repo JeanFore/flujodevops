@@ -102,6 +102,14 @@ jobs:
           EC2_DEPLOY_PATH_SECRET: ${{ secrets.EC2_DEPLOY_PATH }}
           EC2_SSH_KEY_SECRET: ${{ secrets.EC2_SSH_KEY }}
         run: |
+          trim_secret() {
+            printf '%s' "$1" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+          }
+
+          EC2_INSTANCE_SECRET="$(trim_secret "$EC2_INSTANCE_SECRET")"
+          EC2_USER_SECRET="$(trim_secret "$EC2_USER_SECRET")"
+          EC2_DEPLOY_PATH_SECRET="$(trim_secret "$EC2_DEPLOY_PATH_SECRET")"
+
           if [ -z "$EC2_INSTANCE_SECRET" ]; then
             echo "::error::Falta el secret EC2_INSTANCE"
             exit 1
@@ -131,16 +139,31 @@ jobs:
           chmod 600 ~/.ssh/ec2_key
           ssh-keyscan -H "$EC2_INSTANCE" >> ~/.ssh/known_hosts
 
+          ssh-keygen -y -f ~/.ssh/ec2_key > ~/.ssh/ec2_key.pub
+          echo "Fingerprint esperado: SHA256:HTZl6AqWj462Ga4Gnrk+op0UB0hBetJepdtBZ16lb3c"
+          echo "Fingerprint recibido por GitHub Actions:"
+          ssh-keygen -lf ~/.ssh/ec2_key.pub
+
+      - name: Validar conexion SSH
+        shell: bash
+        run: |
+          ssh -i ~/.ssh/ec2_key \
+            -o IdentitiesOnly=yes \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=15 \
+            "$EC2_USER@$EC2_INSTANCE" "echo SSH_OK"
+
       - name: Subir build al EC2
         shell: bash
         run: |
-          ssh -i ~/.ssh/ec2_key -o StrictHostKeyChecking=yes "$EC2_USER@$EC2_INSTANCE" "mkdir -p '$EC2_DEPLOY_PATH/releases'"
-          scp -i ~/.ssh/ec2_key -o StrictHostKeyChecking=yes backend-release/backend.tar.gz "$EC2_USER@$EC2_INSTANCE:$EC2_DEPLOY_PATH/releases/backend-$GITHUB_SHA.tar.gz"
+          ssh -i ~/.ssh/ec2_key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes "$EC2_USER@$EC2_INSTANCE" "mkdir -p '$EC2_DEPLOY_PATH/releases'"
+          scp -i ~/.ssh/ec2_key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes backend-release/backend.tar.gz "$EC2_USER@$EC2_INSTANCE:$EC2_DEPLOY_PATH/releases/backend-$GITHUB_SHA.tar.gz"
 
       - name: Instalar y reiniciar backend en EC2
         shell: bash
         run: |
-          ssh -i ~/.ssh/ec2_key -o StrictHostKeyChecking=yes "$EC2_USER@$EC2_INSTANCE" "DEPLOY_PATH='$EC2_DEPLOY_PATH' RELEASE='backend-$GITHUB_SHA.tar.gz' bash -s" <<'EOF'
+          ssh -i ~/.ssh/ec2_key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes "$EC2_USER@$EC2_INSTANCE" "DEPLOY_PATH='$EC2_DEPLOY_PATH' RELEASE='backend-$GITHUB_SHA.tar.gz' bash -s" <<'EOF'
           set -euo pipefail
 
           mkdir -p "$DEPLOY_PATH/current"
