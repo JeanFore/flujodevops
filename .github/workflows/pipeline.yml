@@ -120,7 +120,14 @@ jobs:
             exit 1
           fi
 
-          EC2_USER="${EC2_USER_SECRET:-ec2-user}"
+          EXPECTED_EC2_INSTANCE="ec2-44-220-172-92.compute-1.amazonaws.com"
+          if [ "$EC2_INSTANCE_SECRET" != "$EXPECTED_EC2_INSTANCE" ]; then
+            echo "::error::EC2_INSTANCE no apunta a la EC2 creada por Terraform. Actualiza el secret EC2_INSTANCE."
+            echo "EC2_INSTANCE esperado: $EXPECTED_EC2_INSTANCE"
+            exit 1
+          fi
+
+          EC2_USER="ec2-user"
           EC2_DEPLOY_PATH="${EC2_DEPLOY_PATH_SECRET:-/home/${EC2_USER}/ai4devs-backend}"
 
           {
