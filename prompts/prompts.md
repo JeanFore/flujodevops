@@ -33,3 +33,5 @@ Configura el workflow para que se active con pull_request en los tipos opened, s
 ```
 
 Prueba de pipeline con EC2 SCDF.
+
+Validacion SSH pipeline SCDF: bcec53e.
