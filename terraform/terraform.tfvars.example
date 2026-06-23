@@ -1,0 +1,14 @@
+aws_access_key = "AKIA..."
+aws_secret_key = "..."
+aws_region     = "us-east-1"
+
+ssh_key_name   = "ai4devs-scdf-deploy-key"
+ssh_public_key = "ssh-rsa AAAA... tu-key-publica"
+
+# Para el ejercicio y GitHub Actions puede quedarse abierto.
+# Para uso real, restringe SSH a tu IP publica con formato "x.x.x.x/32".
+ssh_allowed_cidrs     = ["0.0.0.0/0"]
+backend_allowed_cidrs = ["0.0.0.0/0"]
+
+instance_type = "t2.micro"
+deploy_path   = "/home/ec2-user/ai4devs-backend"
